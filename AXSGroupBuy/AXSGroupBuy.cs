@@ -360,7 +360,12 @@ namespace AXSGroupBuy
             for (int i = 0; i < m_Participants.Count; i++)
             {
                 KeyValuePair<IUser, UserData> participant = m_Participants.ElementAt(i);
-                participantsList += _Prefix + "<@" + participant.Key.Id + ">" + " (" + GetCensoredRoninAddress(participant.Value.m_RoninAddress) + ")";
+                participantsList += _Prefix + "<@" + participant.Key.Id + ">";
+                if (participant.Value.m_RoninAddress.Length > 0)
+                {
+                    participantsList += " (" + GetCensoredRoninAddress(participant.Value.m_RoninAddress) + ")";
+                }
+
                 if (i < m_Participants.Count - 1)
                 {
                     participantsList += _Separator;
