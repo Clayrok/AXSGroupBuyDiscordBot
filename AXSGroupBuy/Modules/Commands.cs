@@ -1,57 +1,86 @@
-﻿using System.Collections.Generic;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
 using Discord.Commands;
 using Discord.WebSocket;
-using Discord.Rest;
 using Discord;
 
 namespace AXSGroupBuy.Modules
 {
     public class Commands : ModuleBase<SocketCommandContext>
     {
-        [Command("createaxspool")]
-        public async Task CreateAxsPoolChannel()
+        [Command("buyaxs", RunMode = RunMode.Async)]
+        public async Task CreatePool()
         {
             await Context.Message.Channel.DeleteMessageAsync(Context.Message);
 
             if (AXSGroupBuy.BuyPoolChannel == null)
             {
-                IReadOnlyCollection<SocketCategoryChannel> guildCategoryChannels = Context.Guild.CategoryChannels;
-                SocketCategoryChannel contextChannel = null;
+                FindPoolTextChannel();
 
-                foreach (SocketCategoryChannel categoryChannel in guildCategoryChannels)
+                if (AXSGroupBuy.BuyPoolChannel != null)
                 {
-                    foreach (SocketGuildChannel channel in categoryChannel.Channels)
-                    {
-                        if (channel.Id == Context.Channel.Id)
-                        {
-                            contextChannel = categoryChannel;
-                            break;
-                        }
-                    }
-
-                    if (contextChannel != null)
-                    {
-                        break;
-                    }
-                }
-
-                if (contextChannel != null)
-                {
-                    RestTextChannel buyPoolChannel = await Context.Guild.CreateTextChannelAsync("AXS Buy Pool", property => property.CategoryId = contextChannel.Id);
-                    await CreateAxsPoolMessage(buyPoolChannel);
+                    await CreateAxsPoolMessage();
                 }
             }
         }
 
-        private async Task CreateAxsPoolMessage(RestTextChannel _BuyPoolChannel)
+        [Command("clearpool", RunMode = RunMode.Async)]
+        public async Task ClearPool()
         {
-            RestUserMessage buyPoolMessage = await _BuyPoolChannel.SendMessageAsync(AXSGroupBuy.GetFormattedBuyPoolMessage());
-            AXSGroupBuy.BuyPoolMessage = buyPoolMessage;
-            await AXSGroupBuy.UpdateMessage();
+            await Context.Message.Channel.DeleteMessageAsync(Context.Message);
 
-            await buyPoolMessage.AddReactionAsync(new Emoji(AXSGroupBuy.ParticipantEmoji));
-            await buyPoolMessage.AddReactionAsync(new Emoji(AXSGroupBuy.EscrowEmoji));
+            if (HasUserPoolAdminRole(Context.User as SocketGuildUser))
+            {
+                await AXSGroupBuy.ClearPool();
+            }
+        }
+
+        [Command("removeescrow", RunMode = RunMode.Async)]
+        public async Task RemoveEscrow()
+        {
+            await Context.Message.Channel.DeleteMessageAsync(Context.Message);
+
+            if (HasUserPoolAdminRole(Context.User as SocketGuildUser))
+            {
+                await AXSGroupBuy.RemoveEscrow();
+            }
+        }
+
+
+        private void FindPoolTextChannel()
+        {
+            ConfigData configData = ConfigParser.ParsedConfigData.Value;
+            AXSGroupBuy.BuyPoolChannel = Context.Guild.GetTextChannel(ulong.Parse(configData.poolChannelId));
+        }
+
+        private async Task CreateAxsPoolMessage()
+        {
+            if (AXSGroupBuy.BuyPoolChannel != null)
+            {
+                ConfigData configData = ConfigParser.ParsedConfigData.Value;
+
+                IUserMessage buyPoolMessage = await AXSGroupBuy.BuyPoolChannel.SendMessageAsync(AXSGroupBuy.GetFormattedMessage(configData.poolMessage));
+                AXSGroupBuy.BuyPoolMessage = buyPoolMessage;
+                await AXSGroupBuy.UpdateMessage();
+                await AXSGroupBuy.AddPoolBotReactions();
+            }
+        }
+
+        private bool HasUserPoolAdminRole(SocketGuildUser _User)
+        {
+            if (_User != null)
+            {
+                ConfigData configData = ConfigParser.ParsedConfigData.Value;
+
+                foreach (SocketRole role in _User.Roles)
+                {
+                    if (configData.poolAdminRoleIds.Contains(role.Id.ToString()))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
     }
 }

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -21,34 +22,24 @@ namespace AXSGroupBuy
         private CommandService m_CommandService = null;
         private IServiceProvider m_ServiceProvider = null;
 
-        private static RestTextChannel m_BuyPoolChannel = null;
-
-        private static RestUserMessage m_BuyPoolMessage = null;
-        private static string m_BuyPoolMessageBaseText = "";
+        private static IMessageChannel m_BuyPoolChannel = null;
+        private static IUserMessage m_BuyPoolMessage = null;
 
         private static Tuple<IUser, UserData> m_Escrow = null;
         private static Dictionary<IUser, UserData> m_Participants = new Dictionary<IUser, UserData>();
 
-        private static string m_ParticipantEmoji = "✅";
-        private static string m_EscrowEmoji = "☑️";
-        private static string m_LockEmoji = "🔒";
-
         private static bool m_IsPoolLocked = false;
-        private static string m_PoolLockedBaseText = "";
 
 
         private static void Main(string[] args) => new AXSGroupBuy().RunBotAsync().GetAwaiter().GetResult();
 
         public async Task RunBotAsync()
         {
-            m_BuyPoolMessageBaseText = "====================\r**AXS Buy Pool**\r__Escrow: __ {0}\r\r__Candidates: __\r{1}\r\r" + ParticipantEmoji + " : Participant\r\r" + EscrowEmoji + " : Escrow\r====================";
-            m_PoolLockedBaseText = "The AXS buying pool has been locked, please contact your escrow (<@{0}>) to start the transaction.";
-
             m_Client = new DiscordSocketClient();
             m_CommandService = new CommandService();
             m_ServiceProvider = new ServiceCollection().AddSingleton(m_Client).AddSingleton(m_CommandService).BuildServiceProvider();
 
-            string token = "ODgyODE0MzQ0Njc1NTkwMTc0.YTA27Q.0hVWjCnVNW2OMLGmaWmDBySKXyU";
+            string token = ConfigParser.ParsedConfigData.Value.botToken;
 
             m_Client.Log += ClientLog;
             m_Client.ReactionAdded += OnReactionAdded;
@@ -62,7 +53,8 @@ namespace AXSGroupBuy
 
         public static Task UpdateMessage()
         {
-            Task.Run(async () => { await m_BuyPoolMessage.ModifyAsync(property => property.Content = GetFormattedBuyPoolMessage()); });
+            ConfigData configData = ConfigParser.ParsedConfigData.Value;
+            m_BuyPoolMessage.ModifyAsync(property => property.Content = GetFormattedMessage(configData.poolMessage));
             return Task.CompletedTask;
         }
 
@@ -81,6 +73,60 @@ namespace AXSGroupBuy
             });
 
             return Task.CompletedTask;
+        }
+
+        public static Task ClearPool()
+        {
+            Task.Run(async () =>
+            {
+                ClearPoolValues();
+                await UpdateMessage();
+                await m_BuyPoolMessage.RemoveAllReactionsAsync();
+                await AddPoolBotReactions();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        public static Task RemoveEscrow()
+        {
+            Task.Run(async () =>
+            {
+                ConfigData configData = ConfigParser.ParsedConfigData.Value;
+
+                await m_BuyPoolMessage.RemoveReactionAsync(new Emoji(configData.addEscrowEmoji), m_Escrow.Item1);
+                await m_BuyPoolMessage.RemoveAllReactionsForEmoteAsync(new Emoji(configData.lockEmoji));
+
+                m_Escrow = null;
+                m_IsPoolLocked = false;
+                await UpdateMessage();
+
+                m_Participants.Clear();
+                await UpdateMessage();
+                await m_BuyPoolMessage.RemoveAllReactionsAsync();
+                await AddPoolBotReactions();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        public static Task AddPoolBotReactions()
+        {
+            Task.Run(async () =>
+            {
+                ConfigData configData = ConfigParser.ParsedConfigData.Value;
+                await m_BuyPoolMessage.AddReactionAsync(new Emoji(configData.addParticipantEmoji));
+                await m_BuyPoolMessage.AddReactionAsync(new Emoji(configData.addEscrowEmoji));
+            });
+
+            return Task.CompletedTask;
+        }
+
+        private static void ClearPoolValues()
+        {
+            m_Escrow = null;
+            m_IsPoolLocked = false;
+            m_Participants.Clear();
         }
 
         private Task HandleCommandReceivedAsync(SocketMessage arg)
@@ -109,94 +155,132 @@ namespace AXSGroupBuy
             return Task.CompletedTask;
         }
 
-
         private Task OnReactionAdded(Cacheable<IUserMessage, ulong> _Message, ISocketMessageChannel _Channel, SocketReaction _Reaction)
         {
             Task.Run(async () =>
             {
                 IUser user = _Channel.GetUserAsync(_Reaction.UserId).Result;
 
-                if (user.Id != m_Client.CurrentUser.Id && !m_IsPoolLocked)
+                if (user.Id != m_Client.CurrentUser.Id)
                 {
                     if (m_BuyPoolMessage != null && _Reaction.MessageId == m_BuyPoolMessage.Id)
                     {
-                        if (_Reaction.Emote.Name == ParticipantEmoji)
+                        ConfigData configData = ConfigParser.ParsedConfigData.Value;
+                        bool isSuccess = false;
+
+                        if (_Reaction.Emote.Name == configData.addParticipantEmoji)
                         {
-                            await OnParticipantAddClicked(user);
+                            isSuccess = OnParticipantAddClicked(user).Result;
                         }
-                        else if (_Reaction.Emote.Name == EscrowEmoji)
+                        else if (_Reaction.Emote.Name == configData.addEscrowEmoji)
                         {
-                            await OnEscrowAddClicked(user);
+                            isSuccess = OnEscrowAddClicked(user).Result;
                         }
-                        else if (_Reaction.Emote.Name == LockEmoji)
+                        else if (_Reaction.Emote.Name == configData.lockEmoji)
                         {
-                            await OnPoolLockClicked(user);
+                            isSuccess = OnPoolLockClicked(user).Result;
                         }
-                        else
+                        else if (_Reaction.Emote.Name == configData.closeEmoji)
+                        {
+                            isSuccess = OnCloseClicked(user).Result;
+                        }
+
+                        if (!isSuccess)
                         {
                             IMessage message = _Channel.GetMessageAsync(_Reaction.MessageId).Result;
                             await message.RemoveReactionAsync(_Reaction.Emote, user);
                         }
                     }
-                    else
-                    {
-                        IMessage message = _Channel.GetMessageAsync(_Reaction.MessageId).Result;
-                        await message.RemoveReactionAsync(_Reaction.Emote, user);
-                    }
                 }
             });
 
             return Task.CompletedTask;
         }
 
-        private Task OnParticipantAddClicked(IUser _User)
+        private async Task<bool> OnParticipantAddClicked(IUser _User)
         {
-            Task.Run(async () =>
+            Task<bool> taskResult = Task<bool>.Run(async () =>
             {
-                if (!Participants.ContainsKey(_User))
+                if (!m_IsPoolLocked && !Participants.ContainsKey(_User))
                 {
                     Participants.Add(_User, new UserData() { m_RoninAddress = "" });
                     await UpdateMessage();
+                    return true;
                 }
+
+                return false;
             });
 
-            return Task.CompletedTask;
+            return await taskResult;
         }
 
-        private Task OnEscrowAddClicked(IUser _User)
+        private async Task<bool> OnEscrowAddClicked(IUser _User)
         {
-            Task.Run(async () =>
+            Task<bool> taskResult = Task<bool>.Run(async () =>
             {
-                if (m_Escrow == null)
+                if (!m_IsPoolLocked && m_Escrow == null)
                 {
                     m_Escrow = new Tuple<IUser, UserData>(_User, new UserData() { m_RoninAddress = "" });
                     await UpdateMessage();
 
-                    if (m_BuyPoolMessage != null)
-                    {
-                        await m_BuyPoolMessage.AddReactionAsync(new Emoji(AXSGroupBuy.LockEmoji));
-                    }
+                    ConfigData configData = ConfigParser.ParsedConfigData.Value;
+                    await m_BuyPoolMessage.AddReactionAsync(new Emoji(configData.lockEmoji));
+
+                    return true;
                 }
+
+                return false;
             });
 
-            return Task.CompletedTask;
+            return await taskResult;
         }
 
-        private Task OnPoolLockClicked(IUser _User)
+        private async Task<bool> OnPoolLockClicked(IUser _User)
         {
-            Task.Run(async () =>
+            Task<bool> taskResult = Task<bool>.Run(async () =>
             {
-                if (m_Escrow != null && _User.Id == m_Escrow.Item1.Id)
+                if (!m_IsPoolLocked && m_Escrow != null && _User.Id == m_Escrow.Item1.Id)
                 {
+                    ConfigData configData = ConfigParser.ParsedConfigData.Value;
                     m_IsPoolLocked = true;
                     foreach (KeyValuePair<IUser, UserData> participant in m_Participants)
                     {
-                        await participant.Key.SendMessageAsync(GetFormattedPoolLockedMessage());
+                        await participant.Key.SendMessageAsync(GetFormattedMessage(configData.poolLockedPrivateMessage));
                     }
+
+                    await m_BuyPoolMessage.AddReactionAsync(new Emoji(configData.closeEmoji));
+
+                    return true;
                 }
+
+                return false;
             });
 
-            return Task.CompletedTask;
+            return await taskResult;
+        }
+
+        private async Task<bool> OnCloseClicked(IUser _User)
+        {
+            Task<bool> taskResult = Task<bool>.Run(async () =>
+            {
+                if (m_IsPoolLocked && m_Escrow != null && m_Escrow.Item1.Id == _User.Id)
+                {
+                    ConfigData configData = ConfigParser.ParsedConfigData.Value;
+
+                    await m_BuyPoolMessage.DeleteAsync();
+                    m_BuyPoolMessage = null;
+
+                    await m_BuyPoolChannel.SendMessageAsync(GetFormattedMessage(configData.poolSuccessMessage));
+
+                    ClearPoolValues();
+
+                    return true;
+                }
+
+                return false;
+            });
+
+            return await taskResult;
         }
 
         private Task OnReactionRemoved(Cacheable<IUserMessage, ulong> _Message, ISocketMessageChannel _Channel, SocketReaction _Reaction)
@@ -207,11 +291,13 @@ namespace AXSGroupBuy
 
                 if (user.Id != m_Client.CurrentUser.Id && m_BuyPoolMessage != null && _Reaction.MessageId == m_BuyPoolMessage.Id)
                 {
-                    if (_Reaction.Emote.Name == ParticipantEmoji)
+                    ConfigData configData = ConfigParser.ParsedConfigData.Value;
+
+                    if (_Reaction.Emote.Name == configData.addParticipantEmoji)
                     {
                         await OnParticipantRemoveClicked(user);
                     }
-                    else if (_Reaction.Emote.Name == EscrowEmoji)
+                    else if (_Reaction.Emote.Name == configData.addEscrowEmoji)
                     {
                         await OnEscrowRemoveClicked(user);
                     }
@@ -221,9 +307,9 @@ namespace AXSGroupBuy
             return Task.CompletedTask;
         }
 
-        private Task OnParticipantRemoveClicked(IUser _User)
+        private async Task OnParticipantRemoveClicked(IUser _User)
         {
-            Task.Run(async () =>
+            await Task.Run(async () =>
             {
                 if (m_Participants.ContainsKey(_User))
                 {
@@ -231,13 +317,11 @@ namespace AXSGroupBuy
                     await UpdateMessage();
                 }
             });
-
-            return Task.CompletedTask;
         }
 
-        private Task OnEscrowRemoveClicked(IUser _User)
+        private async Task OnEscrowRemoveClicked(IUser _User)
         {
-            Task.Run(async () =>
+            await Task.Run(async () =>
             {
                 if (m_Escrow != null && m_Escrow.Item1.Id == _User.Id)
                 {
@@ -247,43 +331,43 @@ namespace AXSGroupBuy
 
                     if (m_BuyPoolMessage != null)
                     {
-                        await m_BuyPoolMessage.RemoveAllReactionsForEmoteAsync(new Emoji(LockEmoji));
+                        ConfigData configData = ConfigParser.ParsedConfigData.Value;
+                        await m_BuyPoolMessage.RemoveAllReactionsForEmoteAsync(new Emoji(configData.lockEmoji));
+                        await m_BuyPoolMessage.RemoveAllReactionsForEmoteAsync(new Emoji(configData.closeEmoji));
                     }
                 }
             });
-
-            return Task.CompletedTask;
         }
 
 
-        public static string GetFormattedBuyPoolMessage()
+        public static string GetFormattedMessage(string _Message)
         {
-            string escrowMention = "";
-            if (m_Escrow != null)
-            {
-                escrowMention = "<@" + m_Escrow.Item1.Id + ">" + " (" + GetCensoredRoninAddress(m_Escrow.Item2.m_RoninAddress) + ")";
-            }
+            string escrowMention = m_Escrow == null ? "" : "<@" + m_Escrow.Item1.Id + ">";
 
-            string participentsList = "";
-            foreach (KeyValuePair<IUser, UserData> participent in m_Participants)
-            {
-                participentsList += "- <@" + participent.Key.Id + ">" + " (" + GetCensoredRoninAddress(participent.Value.m_RoninAddress) + ")\r";
-            }
+            _Message = _Message
+                .Replace("{Escrow}", escrowMention)
+                .Replace("{Participants}", GetParticipantsListString("- ", "\r"))
+                .Replace("{AddParticipantEmoji}", ConfigParser.ParsedConfigData.Value.addParticipantEmoji)
+                .Replace("{AddEscrowEmoji}", ConfigParser.ParsedConfigData.Value.addEscrowEmoji)
+                .Replace("{LockEmoji}", ConfigParser.ParsedConfigData.Value.lockEmoji);
 
-            string result = string.Format(m_BuyPoolMessageBaseText, escrowMention, participentsList);
-            return result;
+            return _Message;
         }
 
-        public static string GetFormattedPoolLockedMessage()
+        private static string GetParticipantsListString(string _Prefix, string _Separator)
         {
-            if (m_Escrow != null)
+            string participantsList = "";
+            for (int i = 0; i < m_Participants.Count; i++)
             {
-                return string.Format(m_PoolLockedBaseText, m_Escrow.Item1.Id);
+                KeyValuePair<IUser, UserData> participant = m_Participants.ElementAt(i);
+                participantsList += _Prefix + "<@" + participant.Key.Id + ">" + " (" + GetCensoredRoninAddress(participant.Value.m_RoninAddress) + ")";
+                if (i < m_Participants.Count - 1)
+                {
+                    participantsList += _Separator;
+                }
             }
-            else
-            {
-                return "";
-            }
+
+            return participantsList;
         }
 
         private static string GetCensoredRoninAddress(string _RoninAddress)
@@ -312,7 +396,7 @@ namespace AXSGroupBuy
         }
 
 
-        public static RestTextChannel BuyPoolChannel
+        public static IMessageChannel BuyPoolChannel
         {
             get => m_BuyPoolChannel;
             set
@@ -320,7 +404,7 @@ namespace AXSGroupBuy
                 m_BuyPoolChannel = value;
             }
         }
-        public static RestUserMessage BuyPoolMessage
+        public static IUserMessage BuyPoolMessage
         {
             get => m_BuyPoolMessage;
             set
@@ -328,18 +412,7 @@ namespace AXSGroupBuy
                 m_BuyPoolMessage = value;
             }
         }
-        public static string BuyPoolMessageText
-        {
-            get => BuyPoolMessageText;
-            set
-            {
-                BuyPoolMessageText = value;
-            }
-        }
         public static DiscordSocketClient Client { get => m_Client; }
         public static Dictionary<IUser, UserData> Participants { get => m_Participants; }
-        public static string ParticipantEmoji { get => m_ParticipantEmoji; }
-        public static string EscrowEmoji { get => m_EscrowEmoji; }
-        public static string LockEmoji { get => m_LockEmoji; }
     }
 }
