@@ -134,20 +134,23 @@ namespace AXSGroupBuy
             Task.Run(async () => 
             {
                 SocketUserMessage message = arg as SocketUserMessage;
-                SocketCommandContext context = new SocketCommandContext(m_Client, message);
-
-                if (message.Author.IsBot)
+                if (message != null)
                 {
-                    return;
-                }
+                    SocketCommandContext context = new SocketCommandContext(m_Client, message);
 
-                int argPos = 0;
-                if (message.HasStringPrefix("!", ref argPos))
-                {
-                    IResult result = await m_CommandService.ExecuteAsync(context, argPos, m_ServiceProvider);
-                    if (!result.IsSuccess)
+                    if (message.Author.IsBot)
                     {
-                        Console.WriteLine(result.ErrorReason);
+                        return;
+                    }
+
+                    int argPos = 0;
+                    if (message.HasStringPrefix("!", ref argPos))
+                    {
+                        IResult result = await m_CommandService.ExecuteAsync(context, argPos, m_ServiceProvider);
+                        if (!result.IsSuccess)
+                        {
+                            Console.WriteLine(result.ErrorReason);
+                        }
                     }
                 }
             });
