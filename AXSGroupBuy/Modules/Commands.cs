@@ -7,7 +7,7 @@ namespace AXSGroupBuy.Modules
 {
     public class Commands : ModuleBase<SocketCommandContext>
     {
-        [Command("buyaxs", RunMode = RunMode.Async)]
+        [Command("openpool", RunMode = RunMode.Async)]
         public async Task CreatePool()
         {
             await Context.Message.Channel.DeleteMessageAsync(Context.Message);

@@ -10,6 +10,7 @@ namespace AXSGroupBuy
         public string botToken;
         public string poolChannelId;
         public List<string> poolAdminRoleIds;
+        public string botStatus;
         public string addParticipantEmoji;
         public string addEscrowEmoji;
         public string lockEmoji;
@@ -32,6 +33,7 @@ namespace AXSGroupBuy
             result.botToken = File.ReadAllText("config" + platformSeparator + "botToken.cfg", Encoding.UTF8);
             result.poolChannelId = File.ReadAllText("config" + platformSeparator + "poolChannelId.cfg", Encoding.UTF8);
             result.poolAdminRoleIds = File.ReadAllLines("config" + platformSeparator + "poolAdminRoleIds.cfg", Encoding.UTF8).ToList();
+            result.botStatus = File.ReadAllText("config" + platformSeparator + "botStatus.cfg", Encoding.UTF8);
             result.addParticipantEmoji = File.ReadAllText("config" + platformSeparator + "addParticipantEmoji.cfg", Encoding.UTF8);
             result.addEscrowEmoji = File.ReadAllText("config" + platformSeparator + "addEscrowEmoji.cfg", Encoding.UTF8);
             result.lockEmoji = File.ReadAllText("config" + platformSeparator + "lockEmoji.cfg", Encoding.UTF8);

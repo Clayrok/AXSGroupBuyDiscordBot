@@ -45,6 +45,8 @@ namespace AXSGroupBuy
             m_Client.ReactionAdded += OnReactionAdded;
             m_Client.ReactionRemoved += OnReactionRemoved;
 
+            await m_Client.SetGameAsync(ConfigParser.ParsedConfigData.Value.botStatus);
+
             await RegisterCommandsAsync();
             await m_Client.LoginAsync(TokenType.Bot, token);
             await m_Client.StartAsync();
